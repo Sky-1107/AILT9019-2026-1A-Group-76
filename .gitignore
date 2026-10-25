@@ -1,0 +1,29 @@
+# Secrets and local environment
+.env
+*.env
+.env.*
+!.env.example
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python build and cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Uploaded reference material (per-session data, never committed)
+data/references/*
+!data/references/.gitkeep
+!data/references/_smoke.md
+
+# Local notes and prompts (keep proposal/ and prompt files out of packaging)
+proposal/
+prompts/
