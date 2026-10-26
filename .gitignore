@@ -23,7 +23,3 @@ htmlcov/
 data/references/*
 !data/references/.gitkeep
 !data/references/_smoke.md
-
-# Local notes and prompts (keep proposal/ and prompt files out of packaging)
-proposal/
-prompts/
