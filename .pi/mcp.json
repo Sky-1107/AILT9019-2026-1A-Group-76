@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "local-curriculum-reader": {
+      "command": "${PYTHON}",
+      "args": [
+        "-m",
+        "mcp_curriculum_server"
+      ],
+      "cwd": "${PLUGIN_ROOT}/..",
+      "description": "Read-only curriculum reference reader rooted at data/references"
+    }
+  }
+}
