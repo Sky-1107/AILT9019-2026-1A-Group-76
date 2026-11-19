@@ -19,8 +19,8 @@ mode.
 ### Windows PowerShell
 
 ```powershell
-git clone https://github.com/Sky-1107/AILT9019-Prototype.git
-cd AILT9019-Prototype
+git clone https://github.com/Sky-1107/AILT9019-2026-1A-Group-76.git
+cd AILT9019-2026-1A-Group-76
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
@@ -31,8 +31,8 @@ python app.py
 ### macOS or Linux
 
 ```bash
-git clone https://github.com/Sky-1107/AILT9019-Prototype.git
-cd AILT9019-Prototype
+git clone https://github.com/Sky-1107/AILT9019-2026-1A-Group-76.git
+cd AILT9019-2026-1A-Group-76
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
