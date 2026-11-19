@@ -25,6 +25,7 @@ from validation import (
     check_feasibility_or_raise,
     payload_texts,
     refusal_message,
+    scan_generated_output,
     scan_texts,
     validate_payload,
 )
@@ -130,13 +131,23 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify(
-        {
-            "status": "ok",
-            "mode": "mock" if agent_service.mock_mode_selected() else "live",
-            "mcp_enabled": agent_service.mcp_enabled(),
-        }
-    )
+    is_mock = agent_service.mock_mode_selected()
+    result = {
+        "status": "ok",
+        "mode": "mock" if is_mock else "live",
+        "mcp_enabled": agent_service.mcp_enabled(),
+    }
+    if not is_mock:
+        runner = agent_service.AgentRunner()
+        result.update(
+            {
+                "model": runner.model_id,
+                "temperature": runner.temperature,
+                "timeout_seconds": runner.timeout_seconds,
+                "max_output_tokens": runner.max_output_tokens,
+            }
+        )
+    return jsonify(result)
 
 
 def _request_fields() -> dict:
@@ -190,8 +201,10 @@ def generate():
         plan["warnings"] = list(dict.fromkeys([*upload_warnings, *plan.get("warnings", [])]))
         plans.attach_extras(plan)
 
-        # Re-scan the generated output before returning it.
-        output_category = scan_texts(draft)
+        # Re-scan the generated output before returning it. Uses the narrow
+        # output check so a lesson whose *topic* is data/student records is not
+        # refused; only real PII leakage or an accreditation claim is.
+        output_category = scan_generated_output(draft)
         if output_category:
             raise SafetyRefusal(
                 refusal_message(output_category),

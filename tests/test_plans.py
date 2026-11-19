@@ -178,6 +178,38 @@ class TestMarkdownRoundTrip:
         assert len(plan["check_questions"]) == 2
         assert plan["disclaimer"] == DISCLAIMER
 
+    def test_questions_are_distributed_across_all_blocks(self):
+        markdown = "\n".join(
+            [
+                "# Lesson Plan Draft: Fractions",
+                "## Time Allocation",
+                "| Phase | Minutes | Tutor focus |",
+                "| --- | ---: | --- |",
+                "| Hook | 5 | Introduce the idea. |",
+                "| Core Concept | 20 | Model the method. |",
+                "| Interactive Exercise | 15 | Practise together. |",
+                "| Wrap-up | 5 | Review the lesson. |",
+                "## Tutor Check-Questions",
+                "- What is the central idea?",
+                "- How would you apply it?",
+                "- What evidence supports your answer?",
+                "- What would you change next time?",
+                "- How does this connect to the example?",
+            ]
+        )
+        plan = parse_markdown_to_plan(
+            markdown,
+            {
+                "topic": "Fractions",
+                "duration_minutes": 50,
+                "buffer_minutes": 5,
+                "usable_minutes": 45,
+            },
+        )
+        block_questions = [question for block in plan["blocks"] for question in block["check_questions"]]
+        assert [len(block["check_questions"]) for block in plan["blocks"]] == [2, 1, 1, 1]
+        assert block_questions == plan["check_questions"]
+
     def test_repair_adjusts_core_concept(self):
         plan = {
             "usable_minutes": 40,
@@ -206,6 +238,159 @@ class TestMarkdownRoundTrip:
         assert any("check-questions" in w for w in warnings)
         assert any("disclaimer" in w for w in warnings)
         assert any("sources" in w for w in warnings)
+
+    def test_validate_warns_when_a_block_has_no_check_question(self):
+        plan = {
+            "objectives": [
+                {"id": "LO1", "text": "x", "bloom": "understand"},
+                {"id": "LO2", "text": "y", "bloom": "apply"},
+            ],
+            "blocks": [
+                {"phase": "Hook", "minutes": 5, "check_questions": ["Why?"]},
+                {"phase": "Core Concept", "minutes": 20, "check_questions": ["How?"]},
+                {"phase": "Interactive Exercise", "minutes": 15, "check_questions": []},
+                {"phase": "Wrap-up", "minutes": 5, "check_questions": ["What next?"]},
+            ],
+            "usable_minutes": 45,
+            "check_questions": ["Why?", "How?", "What next?"],
+            "disclaimer": DISCLAIMER,
+        }
+        warnings = validate_generated_plan(plan)
+        assert any("blocks have no tutor check-question" in warning for warning in warnings)
+
+    def test_salvage_parses_non_schema_draft(self):
+        # A reasoning model that ignores the skill schema: custom headings and
+        # inline "**Time:** N minutes" instead of a Time Allocation table.
+        markdown = "\n".join(
+            [
+                "# Lesson Plan: Fractions",
+                "**Duration:** 50 minutes",
+                "## Learning Objectives",
+                "- Understand what a fraction represents.",
+                "- Identify the numerator and denominator.",
+                "# Lesson Structure",
+                "## 1. Starter Activity",
+                "**Time:** 5 minutes",
+                "Show an image divided into parts.",
+                "## 2. Explanation",
+                "**Time:** 10 minutes",
+                "Model labelling.",
+                "## 3. Main Activity",
+                "**Time:** 12 minutes",
+                "Shade fraction strips.",
+                "## 4. Plenary",
+                "**Time:** 7 minutes",
+                "Which part was most useful?",
+                DISCLAIMER,
+            ]
+        )
+        meta = {
+            "topic": "Fractions",
+            "duration_minutes": 50,
+            "buffer_minutes": 5,
+            "usable_minutes": 45,
+        }
+        plan = parse_markdown_to_plan(markdown, meta)
+        assert len(plan["objectives"]) == 2
+        assert len(plan["blocks"]) == 4
+        assert [b["phase"] for b in plan["blocks"]] == [
+            "Starter Activity",
+            "Explanation",
+            "Main Activity",
+            "Plenary",
+        ]
+        assert plan["blocks"][0]["minutes"] == 5
+        # Salvaged questions come from the interrogative bullets.
+        assert any("most useful" in q for q in plan["check_questions"])
+
+    def test_soft_wrapped_items_are_folded_not_truncated(self):
+        # Models wrap long objectives/questions across physical lines; the
+        # parser must rejoin them, not emit a fragment ending on a dangling word.
+        markdown = "\n".join(
+            [
+                "# Lesson Plan Draft: Frauds",
+                "## Learning Objectives",
+                "- LO1: Apply a decision tree to flag transactions and",
+                "  explain the chosen split rule.",
+                "## Tutor Check-Questions",
+                "- Same amount, different device — do we land on the same leaf?",
+                "  Say the rule aloud before you check.",
+            ]
+        )
+        meta = {
+            "topic": "Frauds",
+            "duration_minutes": 50,
+            "buffer_minutes": 5,
+            "usable_minutes": 45,
+        }
+        plan = parse_markdown_to_plan(markdown, meta)
+        assert plan["objectives"][0]["text"] == (
+            "Apply a decision tree to flag transactions and explain the chosen split rule."
+        )
+        joined = " ".join(plan["check_questions"])
+        assert "Say the rule aloud before you check." in joined
+        assert not any(q.endswith("leaf") for q in plan["check_questions"])
+
+    def test_buffer_and_total_rows_are_not_taught_blocks(self):
+        # Models often add a "Buffer"/"Total" row; those reserve or summarise
+        # time and must not become blocks (usable already excludes the buffer).
+        markdown = "\n".join(
+            [
+                "# Lesson Plan Draft: Fractions",
+                "## Time Allocation",
+                "| Phase | Minutes | Tutor focus |",
+                "| --- | ---: | --- |",
+                "| Hook | 5 | Warm-up. |",
+                "| Core Concept | 20 | Teach. |",
+                "| Interactive Exercise | 15 | Practise. |",
+                "| Wrap-up | 5 | Recap. |",
+                "| Buffer (reserved, not taught) | 5 | Flex time. |",
+                "| Total | 50 | Whole lesson. |",
+            ]
+        )
+        meta = {
+            "topic": "Fractions",
+            "duration_minutes": 50,
+            "buffer_minutes": 5,
+            "usable_minutes": 45,
+        }
+        plan = parse_markdown_to_plan(markdown, meta)
+        assert [b["phase"] for b in plan["blocks"]] == [
+            "Hook",
+            "Core Concept",
+            "Interactive Exercise",
+            "Wrap-up",
+        ]
+        assert sum(b["minutes"] for b in plan["blocks"]) == 45
+
+    def test_repair_targets_core_phase_with_custom_names(self):
+        # Models rarely name a block "Core Concept"; repair must still work.
+        plan = {
+            "usable_minutes": 40,
+            "blocks": [
+                {"phase": "Starter", "minutes": 5},
+                {"phase": "Main teaching", "minutes": 20},
+                {"phase": "Plenary", "minutes": 10},
+            ],
+        }
+        assert repair_block_minutes(plan)
+        assert sum(b["minutes"] for b in plan["blocks"]) == 40
+        # The core/teaching block absorbed the +5 difference (20 -> 25), not the
+        # largest-by-accident (which happens to be the same block here, so we
+        # also check a case where they differ below).
+        assert [b for b in plan["blocks"] if b["phase"] == "Main teaching"][0]["minutes"] == 25
+
+    def test_repair_falls_back_to_largest_block(self):
+        plan = {
+            "usable_minutes": 40,
+            "blocks": [
+                {"phase": "Warm-up", "minutes": 5},
+                {"phase": "Task", "minutes": 25},
+                {"phase": "Review", "minutes": 10},
+            ],
+        }
+        assert repair_block_minutes(plan)
+        assert sum(b["minutes"] for b in plan["blocks"]) == 40
 
     def test_plan_to_markdown_contains_sections(self):
         plan = {

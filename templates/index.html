@@ -33,14 +33,61 @@
                     The buffer feature exists so rigid pacing does not crowd out learning.
                 </p>
             </div>
-            <aside class="boundary-callout" aria-labelledby="boundary-title">
-                <p class="callout-label" id="boundary-title">This tool does not</p>
-                <ol>
-                    <li>Access, grade, or store data or rosters of real students.</li>
-                    <li>Accept official student coursework or personally identifiable information (PII).</li>
-                    <li>Claim or certify that a draft is an officially accredited curriculum.</li>
-                </ol>
-            </aside>
+            <div class="hero-right">
+                <aside class="boundary-callout" aria-labelledby="boundary-title">
+                    <p class="callout-label" id="boundary-title">This tool does not</p>
+                    <ol>
+                        <li>Access, grade, or store data or rosters of real students.</li>
+                        <li>Accept official student coursework or personally identifiable information (PII).</li>
+                        <li>Claim or certify that a draft is an officially accredited curriculum.</li>
+                    </ol>
+                </aside>
+                <aside class="runtime-glossary" id="runtime-glossary"
+                       aria-labelledby="runtime-glossary-title" hidden>
+                    <h2 id="runtime-glossary-title">Live settings, explained</h2>
+                    <dl>
+                        <div>
+                            <dt>Temperature</dt>
+                            <dd>Controls randomness; higher values allow more varied wording.</dd>
+                        </div>
+                        <div>
+                            <dt>Timeout</dt>
+                            <dd>Maximum wait for each provider request before it times out.</dd>
+                        </div>
+                        <div>
+                            <dt>Max output tokens</dt>
+                            <dd>Caps how much text the model can return in one response.</dd>
+                        </div>
+                    </dl>
+                </aside>
+            </div>
+        </section>
+
+        <section class="runtime-panel" aria-labelledby="runtime-title" aria-live="polite">
+            <div class="runtime-intro">
+                <p class="section-kicker">Runtime configuration</p>
+                <h2 id="runtime-title">Current mode</h2>
+                <p class="runtime-mode" id="runtime-mode" role="status">Checking mode&hellip;</p>
+                <p class="runtime-note" id="runtime-note">Loading settings from the server.</p>
+            </div>
+            <dl class="runtime-settings" id="runtime-settings" hidden>
+                <div>
+                    <dt>Model</dt>
+                    <dd id="runtime-model">&mdash;</dd>
+                </div>
+                <div>
+                    <dt>Temperature</dt>
+                    <dd id="runtime-temperature">&mdash;</dd>
+                </div>
+                <div>
+                    <dt>Timeout</dt>
+                    <dd id="runtime-timeout">&mdash;</dd>
+                </div>
+                <div>
+                    <dt>Max output tokens</dt>
+                    <dd id="runtime-max-tokens">&mdash;</dd>
+                </div>
+            </dl>
         </section>
 
         <div class="workspace-grid">
@@ -61,9 +108,12 @@
 
                     <div class="field-row">
                         <div class="field-group">
-                            <label for="duration">Lesson duration <span class="req">*</span></label>
-                            <input id="duration" name="duration" type="text" maxlength="40" required
-                                   placeholder="e.g. 50 mins or 1 hour">
+                            <div class="label-line">
+                                <label for="duration">Lesson duration (in minutes, must be integer) <span class="req">*</span></label>
+                                <span class="field-hint">10&ndash;300 minutes</span>
+                            </div>
+                            <input id="duration" name="duration" type="number" min="10" max="300"
+                                   step="1" required placeholder="e.g. 50">
                         </div>
                         <div class="field-group">
                             <label for="target-level">Target audience <span class="req">*</span></label>

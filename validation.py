@@ -65,6 +65,33 @@ REQUIRED_FIELDS = ("topic", "duration", "target_level", "brief")
 # Prohibited-content patterns
 # ---------------------------------------------------------------------------
 # Each entry maps a regex to a category NAME. The matched text is never returned.
+#
+# Two tiers of rules:
+#  * PROHIBITED_PATTERNS — phrase rules on unambiguous vocabulary ("student
+#    grades", "roster", "gradebook", "attendance register", "student records").
+#    Any occurrence refuses, no exceptions.
+#  * PROHIBITED_INTENT_RULES — an assessment verb (grade / assess / evaluate /
+#    mark / score / rank / test / track…) within a short window of a *people*
+#    object (them, students, the class) or of student-work nouns (essays,
+#    scripts, exams). This catches reworded requests such as "Grade them based
+#    on their in-class performance." Verbs followed by things ("evaluate two
+#    candidate solutions") never match, and legitimate classroom self- and
+#    peer-assessment is exempted — see _SELF_PEER_CUE / _is_learner_agent.
+
+# "the class" only counts as people when it is not immediately a thing
+# ("grade the class discussion", "rank the class activity").
+_CLASS_PEOPLE = r"the\s+class\b(?!\s+(?:discussion|debate|activity|session|lesson|vote))"
+_PERSON = (
+    r"(?:them|students?|learners?|pupils?|" + _CLASS_PEOPLE + r"|everyone|everybody"
+    r"|each\s+(?:student|learner|person|one)|all\s+(?:students|learners)|peers?"
+    r"|their|his|her)"
+)
+_STUDENT_NOUNS = _PERSON
+_STUDENT_WORK = (
+    r"(?:essays?|scripts?|papers?|exams?|coursework|assignments?|homework"
+    r"|worksheets?|quizzes?|tests?)"
+)
+_WINDOW = r"[\w\s,'\"-]{0,24}"
 
 PROHIBITED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("grading", re.compile(r"\b(?:student\s+grades?|grading)\b", re.IGNORECASE)),
@@ -80,6 +107,113 @@ PROHIBITED_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b(?:officially\s+)?accredited\s+(?:course|curriculum|lesson)\b"
             r"|\bofficial\s+accreditation\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("grading", re.compile(r"\bgrade\s?books?\b", re.IGNORECASE)),
+    (
+        "attendance_tracking",
+        re.compile(
+            r"\b(?:attendance|marks|grades|grade)\s+(?:register|sheet|book|list|records?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "student_records",
+        re.compile(
+            r"\b(?:student|learner|pupil)\s+(?:records?|data|files?|profiles?)\b"
+            r"|\b(?:academic|pastoral)\s+records?\b"
+            r"|\breport\s+cards?\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "ranking",
+        re.compile(
+            r"\b(?:class|cohort|year)\s+rankings?\b|\bleaderboards?\b", re.IGNORECASE
+        ),
+    ),
+    (
+        "student_performance",
+        re.compile(r"\b(?:in-?class|classroom)\s+performance\b", re.IGNORECASE),
+    ),
+)
+
+PROHIBITED_INTENT_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "grading",
+        re.compile(
+            rf"\b(?:grade|grades|graded|grading)\b{_WINDOW}\b(?:{_PERSON}|{_STUDENT_WORK})\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "student_assessment",
+        re.compile(
+            rf"\b(?:assess|assesses|assessed|assessing)\b{_WINDOW}\b(?:{_PERSON}|{_STUDENT_WORK})\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "student_assessment",
+        re.compile(
+            rf"\b(?:evaluat(?:e|es|ed|ing))\b{_WINDOW}\b(?:{_STUDENT_NOUNS})\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        # "mark" is a common noun/verb outside grading contexts ("mark the key
+        # terms", "landmark"), so this rule requires the *progression* forms
+        # ("marking the students' essays") plus a people/work object.
+        "marking",
+        re.compile(
+            rf"\b(?:marking|marked)\b{_WINDOW}\b(?:{_PERSON}|{_STUDENT_WORK})\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        # Bare imperative "mark(s) their essays" — only when the work noun is
+        # possessed by people, keeping "mark the key turning points" clean.
+        "marking",
+        re.compile(
+            r"\b(?:mark|marks)\b[\w\s,'\"-]{0,12}\b(?:their|his|her|its|students?'?|learners?'?|pupils?'?)'?\s+"
+            r"(?:essays?|scripts?|papers?|exams?|coursework|assignments?|homework"
+            r"|worksheets?|quizzes?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "scoring",
+        re.compile(
+            rf"\b(?:scor(?:e|es|ed|ing))\b{_WINDOW}\b(?:{_PERSON}|{_STUDENT_WORK})\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "ranking",
+        re.compile(
+            rf"\b(?:rank|ranks|ranked|ranking)\b{_WINDOW}\b(?:{_STUDENT_NOUNS})\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "student_assessment",
+        re.compile(
+            r"\b(?:test|tests|tested|testing)\s+(?:the\s+)?(?:students?|class|learners?|pupils?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        # track/monitor/record/log + a person possessive + a tracked noun:
+        # "keep a record of their attendance", "track student progress".
+        # "track the lesson's progress" does not match (no person reference).
+        "student_performance",
+        re.compile(
+            rf"\b(?:track|tracks|tracking|monitor|monitors|monitoring|record|records"
+            rf"|recording|log|logs|logging)\b{_WINDOW}"
+            rf"\b(?:their|his|her|students?'?|learners?'?|pupils?'?|class(?:room)?)'?\s+"
+            rf"(?:performance|progress|attendance|participation|behaviour|behavior"
+            rf"|absences?|marks|grades|scores)\b",
             re.IGNORECASE,
         ),
     ),
@@ -109,8 +243,13 @@ _REFUSAL_CORE = (
 
 _CATEGORY_HINTS = {
     "grading": "grading or assessment of students",
+    "marking": "marking student work",
+    "scoring": "scoring students or their work",
     "student_assessment": "student assessment records",
     "student_performance": "student performance data",
+    "attendance_tracking": "attendance or mark tracking",
+    "student_records": "student records",
+    "ranking": "ranking or rating of students",
     "roster": "student rosters",
     "official_assessment": "official student assessment",
     "student_id": "student IDs",
@@ -124,11 +263,35 @@ _CATEGORY_HINTS = {
 }
 
 
+# Legitimate classroom self/peer assessment ("learners peer-assess each other's
+# drafts", "students self-evaluate", "groups grade one another") is not the tool
+# judging real students, so intent rules skip matches whose surrounding wording
+# contains one of these cues.
+_SELF_PEER_CUE = re.compile(
+    r"\b(?:self|peer|mutual)[-_ ]?(?:assess|evaluat|grad|mark|scor|review|feedback|test)"
+    r"|\b(?:assess|evaluat|grad|mark|scor|review|test)(?:e|es|ed|ing)?[-_ ]?(?:self|peers)"
+    r"|\beach\s+other(?:'?s)?\b|\bone\s+another\b",
+    re.IGNORECASE,
+)
+
+
+def _is_learner_agent(text: str, start: int, end: int) -> bool:
+    """True when the window around an intent-rule match signals self/peer work."""
+    lo = max(0, start - 30)
+    hi = min(len(text), end + 15)
+    return bool(_SELF_PEER_CUE.search(text, lo, hi))
+
+
 def find_safety_violation(*texts: str) -> str | None:
     """Return the prohibited-content *category* found in the texts, never the match."""
     joined = "\n".join(text for text in texts if text)
     for category, pattern in PROHIBITED_PATTERNS:
         if pattern.search(joined):
+            return category
+    for category, pattern in PROHIBITED_INTENT_RULES:
+        for match in pattern.finditer(joined):
+            if _is_learner_agent(joined, match.start(), match.end()):
+                continue
             return category
     return None
 
@@ -156,6 +319,36 @@ def scan_texts(*texts: str) -> str | None:
     if category:
         return category
     return find_pii_violation(*texts)
+
+
+# ---------------------------------------------------------------------------
+# Generated-output scan
+# ---------------------------------------------------------------------------
+# The full scan_texts above judges a *user's request intent*, so it is
+# intentionally aggressive (broad vocabulary + verb/object intent rules). Those
+# same rules misfire on generated lesson prose, where topic words such as
+# "student data", "personal records" or "assess a transaction" are legitimate
+# subject matter (e.g. a fraud-detection or data-privacy lesson). The output
+# re-scan therefore checks only unambiguous violations that a draft must never
+# contain: real PII, and a claim that the draft is an accredited curriculum.
+_OUTPUT_SAFETY_CATEGORIES = ("accreditation",)
+_OUTPUT_PII_CATEGORIES = ("email", "phone", "dob", "named_grade")
+
+
+def scan_generated_output(*texts: str) -> str | None:
+    """Return a refusal category for a *generated draft*, or None.
+
+    Narrow by design: concrete PII leakage or an accreditation claim only, so a
+    lesson about handling personal/student data is not refused for its topic.
+    """
+    joined = "\n".join(text for text in texts if text)
+    for category, pattern in PROHIBITED_PATTERNS:
+        if category in _OUTPUT_SAFETY_CATEGORIES and pattern.search(joined):
+            return category
+    for category, pattern in PII_PATTERNS:
+        if category in _OUTPUT_PII_CATEGORIES and pattern.search(joined):
+            return category
+    return None
 
 
 # ---------------------------------------------------------------------------

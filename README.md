@@ -1,147 +1,166 @@
 # Lesson-Plan Scaffolder
 
-A Flask web application, where a tutor pastes a short teaching
-brief (topic, duration, audience, context, optional reference files), and the tool
-generates a structured lesson-plan draft — learning objectives, a time allocation, a
-lesson outline, and tutor check-questions — in an **editable three-column workspace**
-with a live total-time calculator and buffer-time indicator.
+A Flask application for university tutors. Enter a teaching brief, audience, and
+duration to create an editable lesson-plan draft with learning objectives, timed
+activities, an outline, and tutor check-questions. Mock mode works offline; live mode
+uses either an OpenAI-compatible Completions endpoint or the OpenAI Responses API.
+Tutor review is always required.
 
-Generation runs through a **live LLM** (`pi_python.Agent` + `OpenAICompletionsProvider`).
-A deterministic **mock mode** gives the same output shape offline, for testing and demos.
+The tool does **not** assess or grade real students, accept student records, IDs,
+coursework or personal data, or certify an accredited curriculum. Briefs and reference
+text are sent to the configured provider in live mode; do not enter sensitive data.
 
-**Target user:** university tutors and teaching staff. The tool supports — and never
-replaces — tutor judgment.
+## Run locally
 
-## This tool does not
+Requires Python 3.10 or later (verified with Python 3.14.3). Dependencies are pinned
+in [`requirements.txt`](requirements.txt). No API key is needed for the default mock
+mode.
 
-1. Assess, grade, or store data or rosters of real students.
-2. Accept official student coursework or personally identifiable information (PII).
-3. Claim or certify that a draft is an officially accredited curriculum.
+### Windows PowerShell
 
-Requests that touch these boundaries are refused (HTTP 400 `safety_refusal`); impossible
-or overloaded briefs are refused too (HTTP 422 `feasibility_refusal`). Refusal messages
-name the category only — they never echo your text. Every draft carries:
-*"Preliminary, non-accredited draft; tutor review required."*
-
-## How it works
-
-```
-Web form (brief + optional files)
-  → Flask API            validate fields, scan for PII/prohibited content
-  → files.py             allowlist + size checks, text extraction, sanitization
-  → plans.py             duration parsing, buffer math, feasibility check
-  → agent_service.py     live LLM via pi_python; .pi/ skill, context, and MCP reader
-                         injected; uploads passed as delimited UNTRUSTED data
-  → post-process         parse Markdown → structured plan → repair/retry → re-scan
-  → JSON response        { status, draft, plan, sources, warnings, meta }
-  → Editable workspace   tutor reviews, edits, copies, exports Markdown, regenerates
+```powershell
+git clone https://github.com/Sky-1107/AILT9019-Prototype.git
+cd AILT9019-Prototype
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python app.py
 ```
 
-Only `agent_service.py` imports `pi_python`. The MCP curriculum reader
-(`mcp_curriculum_server.py`) is **read-only** and confined to `data/references/`.
-
-## Setup
-
-Python 3.10+ (verified on 3.14).
+### macOS or Linux
 
 ```bash
-git clone <this repo> && cd <repo name>
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env               # then edit .env  (see table below)
-python app.py                      # open http://127.0.0.1:5000
+git clone https://github.com/Sky-1107/AILT9019-Prototype.git
+cd AILT9019-Prototype
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+python app.py
 ```
 
-No API key? Just skip the key and the app runs in mock mode automatically.
+Open <http://127.0.0.1:5000>. `.env` is ignored by Git and must be created locally.
+Restart the app after changing it. The example sets `MOCK_MODE=1`; for live generation,
+set `MOCK_MODE=0`, provide a valid `API_KEY`, and verify `BASE_URL` and `MODEL`.
+If the key is empty, the app safely selects mock mode.
 
-## Configuration (`.env`)
+## `.env` settings
 
-`.env` is git-ignored; you create it from `.env.example` after cloning. All variables
-are optional unless noted. **Variable names must match exactly** (including the
-`OPENAI_` prefix) — unknown names are silently ignored — and the file is read only at
-startup, so **restart `python app.py` after editing it**. Provider settings are read
-only inside `agent_service.py`; secrets are never logged.
+The names and defaults below match [`.env.example`](.env.example). Keep the endpoint
+root in `BASE_URL`; the selected provider adds its API path.
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `API_KEY` | *(empty)* | **Required for live generation.** API key for the provider. If empty (or `MOCK_MODE=1`), the app uses the deterministic mock path and the UI shows a "Demo mode" badge. |
-| `BASE_URL` | `https://api.openai.com/v1` | Root URL of any OpenAI-compatible `/chat/completions` endpoint (e.g. Ollama `http://localhost:11434/v1`, vLLM, Azure-compatible gateways). |
-| `MODEL` | `gpt-4o-mini` | Model name sent to the endpoint. Custom models are declared automatically with safe context/output limits, so unknown names still work. |
-| `TEMPERATURE` | `0` | Sampling temperature. `0` = most deterministic drafts; raise for more varied wording. |
-| `TIMEOUT_SECONDS` | `60` | Per-request HTTP timeout for the provider. On timeout the API returns a friendly 502 `provider_error`. |
-| `MAX_OUTPUT_TOKENS` | `2000` | Cap on the model's output length per draft. |
-| `MOCK_MODE` | `1` | `1` forces the offline mock path even when an API key is set (used by CI/tests). |
-| `MCP_ENABLED` | `1` | `1` starts the read-only MCP curriculum reader from `.pi/mcp.json` and gives the agent its tools. `0` skips MCP. If the server fails to start, generation continues without it and a warning is returned. |
-| `MCP_REQUIRED` | `0` | `1` makes a failed MCP start a hard error (502) instead of a warning. |
-| `SESSION_RETENTION_HOURS` | `24` | Uploaded reference files are kept under `data/references/uploads/<session>/` for this many hours, then swept at startup and before each request. Refusals delete immediately. |
-| `FLASK_DEBUG` | `0` | `1` enables Flask's debug reloader (development only). |
-| `SECRET_KEY` | `change-me` | Reserved for Flask sessions. The app is stateless today, so this value is not used at runtime; keep a random one if you later add sessions. |
+| Variable | Default | What it controls |
+| --- | --- | --- |
+| `PROVIDER` | `responses` | API protocol: `responses` sends to `/responses`; `completions` sends to `/chat/completions`. |
+| `API_KEY` | *(empty)* | Provider key. Required with `MOCK_MODE=0`; it must belong to the service at `BASE_URL`. |
+| `BASE_URL` | `https://api.hku.hk/openai/student/v1` | Provider endpoint root, not the full `/responses` or `/chat/completions` URL. |
+| `MODEL` | `gpt-4.1-nano` | Model identifier accepted by that endpoint. |
+| `TEMPERATURE` | `0.4` | Sampling variation: lower is more consistent; higher is more varied. |
+| `TIMEOUT_SECONDS` | `90` | HTTP timeout used for a provider request. |
+| `MAX_OUTPUT_TOKENS` | `2000` | Maximum output length requested from the model. |
+| `MOCK_MODE` | `1` | `1` forces the offline generator; `0` permits live generation when a key is set. |
+| `MCP_ENABLED` | `1` | Enables the local, read-only curriculum MCP server in live mode. |
+| `MCP_REQUIRED` | `0` | `1` makes an MCP startup failure a provider error instead of a warning. |
+| `SESSION_RETENTION_HOURS` | `24` | How long uploaded reference files are retained before cleanup. |
+| `FLASK_DEBUG` | `0` | Enables Flask's development debugger/reloader when set to `1`; keep disabled otherwise. |
+| `SECRET_KEY` | `change-me` | Reserved for Flask sessions; the current stateless app does not use it. |
 
-## Trying it out
+`GET /api/health` reports the effective mode and safe runtime settings, but never
+returns the key or endpoint URL. For a live generation, `meta.mcp_connected` reports
+whether the curriculum server started. A provider failure returns a safe `502` error;
+the key and traceback are not returned to the browser.
 
-Three quick cases (from the UI, or with curl against `POST /api/generate`):
+Request validation and safety refusals return HTTP 400, infeasible lesson briefs
+return HTTP 422, and provider failures return HTTP 502. For live-provider errors,
+check `error.details.reason`: authentication/authorization errors require a key with
+access to the selected endpoint, `unknown_model` means the model or endpoint was not
+found, and `rate_limited` indicates a quota or rate limit. Never include the API key
+when sharing an error report.
 
-1. **Positive:** topic *"Fraud detection with decision trees"*, duration `50 mins`,
-   audience `1st Year Undergrad`, a short worked-example brief, buffer `auto`.
-   Expect `status` `mock`/`ok`, 2–5 objectives, 4 blocks summing to usable minutes
-   (50 − 5 = 45), ≥3 check-questions, and the disclaimer.
-2. **Safety refusal:** a brief containing *"student grades"* or *"roster"*.
-   Expect HTTP 400, `error.code == "safety_refusal"`, no draft, no echo of the phrase.
-3. **Feasibility refusal:** duration `15 mins` asking for *"10 learning objectives"*.
-   Expect HTTP 422, `error.code == "feasibility_refusal"`, with an explanation.
+## Reproduce the main cases
 
-`GET /api/health` reports `{"status":"ok","mode":"live"|"mock","mcp_enabled":…}`.
+| Case | Example input | Expected result |
+| --- | --- | --- |
+| Successful draft | Topic: decision trees; duration: 50 minutes; a short worked-example brief; buffer: auto. | HTTP 200; four time blocks sum to usable minutes; each block has 1–3 check-questions; draft includes the non-accreditation notice. |
+| Safety boundary | Brief: `Grade them based on their in-class performance.` | HTTP 400 `safety_refusal`; no draft and no echo of the brief. |
+| Feasibility boundary | Duration: 15 minutes; brief asks for 10 learning objectives. | HTTP 422 `feasibility_refusal` with an explanation. |
 
-## Testing
+Run these three automated cases:
 
 ```bash
-MOCK_MODE=1 pytest -q          # PowerShell: $env:MOCK_MODE='1'; pytest -q
+python -m pytest -q tests/test_api.py::TestPositiveGeneration::test_mock_shape_and_plan
+python -m pytest -q tests/test_api.py::TestRefusals::test_reworded_grading_refusal_400
+python -m pytest -q tests/test_api.py::TestRefusals::test_feasibility_refusal_422
 ```
 
-100 offline tests cover validation and PII scans, duration/buffer/allocation math,
-feasibility refusals, upload rules and cleanup, and the full API contract in mock mode.
-`tests/fake_openai_server.py` is an optional helper: a fake OpenAI-compatible SSE
-endpoint for exercising the live path offline (set `OPENAI_BASE_URL` to it).
+## Tests and provider compatibility
 
-## Uploads, privacy, and MCP
+Run the complete offline suite with:
 
-- Uploads: `.pdf .docx .txt .md` only, ≤10 MB each, ≤5 per request, ≤25 MB total;
-  magic-byte checked; stored outside the web root with randomized names; text capped at
-  20,000 chars/file, sanitized, and scanned before use. File contents are never logged.
-- Briefs and reference text are **sent to the configured LLM provider**. Never upload
-  student records, grades, or coursework — the UI warns before upload.
-- Uploaded/MCP text is wrapped in `<<<UNTRUSTED_REFERENCE_MATERIAL ...>>>` and treated
-  as data, never as instructions (prompt-injection guard).
-- `data/references/` is the MCP reader's root (a sample `_smoke.md` is included). The
-  server exposes only read/list/search tools and rejects paths outside the root.
+```bash
+python -m pytest -q
+```
 
-## pi_python compatibility
+The latest local run on Python 3.14.3 completed with **169 passed**.
+The suite covers mock generation, request validation, safety and PII refusals,
+feasibility and timing, uploads, UI consistency, and the API response shape. Live-path
+tests use a fake OpenAI-compatible server on loopback; they require no external network
+or real API key:
 
-Verified 2026-10-25 with `pi-python-core[mcp]==0.11.0` (import name `pi_python`,
-v0.11.0) on Python 3.14.3.
+```bash
+python -m pytest -q tests/test_api_live.py
+```
 
-- Agent: `pi_python.Agent(provider=…, model=…, system_prompt=…, options=…)`; the app
-  uses `prompt_sync()`, which returns a `RunResult` (`.status`, `.messages`, `.usage`).
-- Provider: `OpenAICompletionsProvider(base_url=…, api_key=…, transport=…)` with the
-  timeout set through `HTTPTransport(timeout=…)`; the configured model is declared with
-  `provider.model(id, max_tokens=MAX_OUTPUT_TOKENS)` because this provider never guesses
-  model capabilities.
-- `.pi` loading: `.pi/` is loaded as a `pi_python` plugin (`load_plugins`), which
-  registers the skill (SKILL.md carries the required `name`/`description` frontmatter)
-  and starts the MCP server defined in `.pi/mcp.json` (`${PYTHON}` / `${PLUGIN_ROOT}`
-  are expanded by the loader). Context and skill text are additionally injected into
-  the system prompt in the fixed order.
+That suite exercises both provider protocols, authentication and provider errors,
+MCP startup/failure, malformed-output retry, and generated-output safety checks.
+To check the MCP integration alone:
 
-`mcp-server-filesystem` **does not exist on PyPI** (verified with `pip index versions`),
-and the nearest package is not read-only, so the curriculum reader is the repo-local
-`mcp_curriculum_server.py` built on the `mcp>=2.3,<3` SDK.
+```bash
+python -m pytest -q tests/test_api_live.py::TestLiveMcp::test_mcp_reader_starts_and_connects
+```
 
-## Ethics and limitations
+The live adapter is verified with `pi-python-core==0.11.0` and `mcp==2.3.0`. These
+are the relevant API shapes used (abridged where marked):
 
-- Drafts are a **starting point, not a script** — your real-time judgment wins; the UI
-  keeps this notice visible. Buffer time (auto: 5 min per 30) exists so rigid pacing
-  does not crowd out learning.
-- Non-accredited output; tutor review required; live quality varies with the model.
-- Streaming responses, PDF export, and rubric self-scoring are not implemented. Presets,
-  density flag, and the pre-class checklist **are** implemented.
+```text
+Agent(..., provider=..., model=..., options=..., system_prompt=...)
+OpenAICompletionsProvider(*, base_url, name="openai-compatible", **kwargs)
+OpenAIProvider(*, base_url="https://api.openai.com/v1", **kwargs)
+PluginSet.agent(*, system_prompt=..., tools=..., hooks=..., **kwargs)
+Agent.prompt_sync(
+    message: str | Message | list[Message],
+    images: list[ImageContent] | None = None,
+) -> RunResult
+```
+
+In the adapter, `OpenAICompletionsProvider.model(id, max_tokens=...)` creates the
+Completions model; the Responses path creates a `ModelInfo` with
+`api="openai-responses"`. `AgentRunner.context_texts()` reads sorted
+`.pi/context/*.md`, `require_skill()` reads the active `SKILL.md`, and
+`build_system_prompt()` assembles them. `load_plugins([PI_DIR])` reads `.pi/mcp.json`
+as configuration, then `PluginSet.agent()` creates the agent and
+`Agent.prompt_sync()` runs it. The MCP configuration starts
+[`mcp_curriculum_server.py`](mcp_curriculum_server.py), which provides list/search/read
+tools limited to `data/references/`.
+
+## Files, privacy, and limits
+
+- Uploads accept PDF, DOCX, TXT, and Markdown; each file is limited to 10 MB, up to five
+  files and 25 MB total. Extracted text is capped at 20,000 characters per file,
+  sanitized, and checked before use.
+- Uploaded files are stored outside the web root under `data/references/uploads/`,
+  removed on refusal, and cleaned up after the configured retention period. Generated
+  plans are not persisted by the application.
+- Uploaded and MCP reference text is treated as untrusted data, not instructions. The
+  local MCP reader is read-only and cannot access paths outside `data/references/`.
+- The mock generator provides an offline, variable-wording example; it is not evidence
+  of live-model performance. Live output quality varies by provider and needs tutor
+  review. Streaming, PDF export, and rubric self-scoring are not implemented.
+
+## GitHub Pages and demonstrations
+
+The static project site lives in [`docs/`](docs/). Follow [`docs/README.md`](docs/README.md)
+to publish it from GitHub Pages; adding the files alone does not make the site public.
+The presentation and demonstration videos are separate submission items and must be
+recorded and linked by the project team.

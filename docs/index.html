@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="The Lesson-Plan Scaffolder turns a tutor's teaching brief into an editable, preliminary lesson-plan draft.">
+  <meta name="theme-color" content="#f4f8f7">
+  <title>Lesson-Plan Scaffolder | AILT9019</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" id="top">
+    <a class="brand" href="#top" aria-label="Lesson-Plan Scaffolder home">
+      <span class="brand-mark" aria-hidden="true">LP</span>
+      <span>Lesson-Plan Scaffolder</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#workflow">Workflow</a>
+      <a href="#example">Run example</a>
+      <a href="#evidence">Evidence</a>
+      <a href="#privacy">Safety &amp; limits</a>
+      <a class="nav-repo" href="https://github.com/Sky-1107/AILT9019-Prototype">Source code</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <p class="eyebrow">AILT9019 | Project overview</p>
+        <h1 id="page-title">A useful first draft.<br><span>A tutor stays in charge.</span></h1>
+        <p class="hero-lede">
+          The Lesson-Plan Scaffolder turns a short teaching brief into an editable plan
+          with learning objectives, timed activities, and check-questions. It is a
+          planning aid for university tutors, not a script or a substitute for teaching
+          judgment.
+        </p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#example">See a real mock-mode run</a>
+          <a class="button button-secondary" href="#setup">Run it locally</a>
+        </div>
+      </div>
+      <aside class="hero-card" aria-label="Project at a glance">
+        <p class="card-kicker">At a glance</p>
+        <dl class="facts">
+          <div><dt>For</dt><dd>University tutors and teaching staff</dd></div>
+          <div><dt>Input</dt><dd>Brief, duration, audience, optional references</dd></div>
+          <div><dt>Output</dt><dd>Editable draft, time plan, and tutor checks</dd></div>
+          <div><dt>Modes</dt><dd>Offline mock or configured live LLM</dd></div>
+        </dl>
+        <p class="hero-card-note">Tutor review is required before teaching.</p>
+      </aside>
+    </section>
+
+    <section class="notice-bar" aria-label="Important project notice">
+      <span class="notice-icon" aria-hidden="true">!</span>
+      <p><strong>Support tool, not a script.</strong> Use the draft only where it serves your class. Buffer time is included to reduce pressure for rigid pacing.</p>
+    </section>
+
+    <section class="section" id="purpose" aria-labelledby="purpose-title">
+      <div class="section-heading">
+        <p class="eyebrow">01 | Purpose and scope</p>
+        <h2 id="purpose-title">From teaching intent to a plan a person can shape</h2>
+      </div>
+      <div class="two-column">
+        <div class="prose-card">
+          <h3>The planning problem</h3>
+          <p>
+            A teaching brief still needs to become a feasible sequence: what learners
+            should do, how time is divided, and where a tutor can check understanding.
+            This project helps draft that structure so the tutor can review and adapt it.
+          </p>
+          <p>
+            The app accepts a topic, lesson duration, target audience, brief, optional
+            activity and pacing preferences, and curriculum reference files. The result
+            remains editable in the browser.
+          </p>
+        </div>
+        <div class="scope-card">
+          <h3>What the project built</h3>
+          <ul class="check-list">
+            <li>Flask request flow with validation, feasibility checks, and safety refusals.</li>
+            <li>Plan and buffer calculations, upload extraction, and retention cleanup.</li>
+            <li>Mock/live generation adapter, structured-plan parsing, and output checks.</li>
+            <li>Editable three-column workspace with copy, Markdown export, and regenerate actions.</li>
+          </ul>
+          <p class="small-note">
+            The implementation uses existing building blocks including Flask,
+            <code>pi_python</code>, and its provider interfaces; the project-specific
+            workflow and tutor workspace connect them.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-tinted" id="workflow" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <p class="eyebrow">02 | How it works</p>
+        <h2 id="workflow-title">A short path from brief to tutor-reviewed draft</h2>
+        <p class="section-intro">The same structured response shape is used by mock and live generation.</p>
+      </div>
+      <ol class="workflow">
+        <li>
+          <span class="step-number">1</span>
+          <h3>Describe the session</h3>
+          <p>Enter the topic, duration, audience, and teaching brief; add optional preferences or reference files.</p>
+        </li>
+        <li>
+          <span class="step-number">2</span>
+          <h3>Check the request</h3>
+          <p>Validate required fields and timing, scan for disallowed student data or PII, and refuse infeasible briefs.</p>
+        </li>
+        <li>
+          <span class="step-number">3</span>
+          <h3>Build the draft</h3>
+          <p>Plan the usable minutes and buffer, then use the mock path or configured LLM provider with project context.</p>
+        </li>
+        <li>
+          <span class="step-number">4</span>
+          <h3>Review the response</h3>
+          <p>Parse and validate the generated plan, check output boundaries, and include sources or warnings where applicable.</p>
+        </li>
+        <li>
+          <span class="step-number">5</span>
+          <h3>Edit and take away</h3>
+          <p>Adjust the plan in the workspace, check the total time, then copy, export Markdown, or regenerate.</p>
+        </li>
+      </ol>
+      <div class="pipeline" aria-label="Application architecture">
+        <p><strong>Architecture:</strong> browser form -> Flask API -> validation and upload processing -> duration, buffer, and feasibility logic -> isolated <code>agent_service.py</code> -> structured plan and safety re-scan -> editable workspace.</p>
+        <p>The local curriculum MCP reader is read-only and limited to <code>data/references/</code>.</p>
+      </div>
+    </section>
+
+    <section class="section" id="customize" aria-labelledby="customize-title">
+      <div class="section-heading">
+        <p class="eyebrow">03 | Teaching-domain customisation</p>
+        <h2 id="customize-title">Adapt the draft without handing over tutor judgment</h2>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <span class="feature-icon" aria-hidden="true">A</span>
+          <h3>Choose a starting structure</h3>
+          <p>Use the STEM problem-solving, essay discussion, or lab demonstration preset, then edit the brief for the actual session.</p>
+        </article>
+        <article class="feature-card">
+          <span class="feature-icon" aria-hidden="true">B</span>
+          <h3>Set the class context</h3>
+          <p>Provide the duration and audience, and optionally describe activity types and pacing preferences.</p>
+        </article>
+        <article class="feature-card">
+          <span class="feature-icon" aria-hidden="true">C</span>
+          <h3>Ground it in reference material</h3>
+          <p>Add curriculum-only files or use the local read-only reference library. Reference text is treated as data, not instructions.</p>
+        </article>
+      </div>
+      <p class="section-intro">
+        These choices adapt the sequence to the class without automating assessment:
+        activity and pacing preferences tune the draft, the buffer protects transition
+        and question time, and curriculum references provide context while remaining
+        untrusted input.
+      </p>
+      <p class="inline-warning"><strong>Never use student records, grades, coursework, or personal data.</strong> Uploaded briefs and reference text are sent to the configured LLM provider in live mode.</p>
+    </section>
+
+    <section class="section section-tinted" id="example" aria-labelledby="example-title">
+      <div class="section-heading">
+        <p class="eyebrow">04 | Genuine run example</p>
+        <h2 id="example-title">A local mock-mode response, captured from the application</h2>
+        <p class="section-intro">This example is an actual successful <code>POST /api/generate</code> response with <code>MOCK_MODE=1</code>. The selected plan fields below quote that response. It did not call a live LLM or use an API key; mock wording may vary between runs.</p>
+      </div>
+
+      <div class="example-layout">
+        <article class="example-input">
+          <p class="card-kicker">Input brief</p>
+          <dl class="input-facts">
+            <div><dt>Topic</dt><dd>How decision trees classify plant samples</dd></div>
+            <div><dt>Duration</dt><dd>50 minutes</dd></div>
+            <div><dt>Audience</dt><dd>First-year undergraduates</dd></div>
+            <div><dt>Activities</dt><dd>Worked example, pair discussion</dd></div>
+            <div><dt>Brief</dt><dd>Students use a small fictional table of leaf width and color to follow a decision tree, compare two classification paths, and discuss one ambiguous sample.</dd></div>
+            <div><dt>Buffer</dt><dd>Auto</dd></div>
+          </dl>
+          <div class="response-status">HTTP 200 | <code>status: mock</code></div>
+        </article>
+
+        <article class="example-output">
+          <div class="output-heading">
+            <div>
+              <p class="card-kicker">Returned plan</p>
+              <h3>Four blocks | 45 usable minutes</h3>
+            </div>
+            <span class="buffer-tag">5 min buffer</span>
+          </div>
+          <div class="time-table-wrap">
+            <table class="time-table">
+              <caption class="visually-hidden">Lesson blocks returned by the mock-mode run</caption>
+              <thead><tr><th scope="col">Phase</th><th scope="col">Time</th><th scope="col">Tutor focus</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">Hook</th><td>5 min</td><td>Show a short real-world vignette about How decision trees classify plant samples; solicit quick predictions.</td></tr>
+                <tr><th scope="row">Core Concept</th><td>20 min</td><td>Present How decision trees classify plant samples as a two-step method; check understanding after each step.</td></tr>
+                <tr><th scope="row">Interactive Exercise</th><td>15 min</td><td>Small groups tackle a mini-challenge on How decision trees classify plant samples, then report one insight each.</td></tr>
+                <tr><th scope="row">Wrap-up</th><td>5 min</td><td>Revisit the opening question; learners answer it with today's vocabulary.</td></tr>
+              </tbody>
+              <tfoot><tr><th scope="row">Teaching time</th><td>45 min</td><td>Plus 5 minutes reserved as buffer.</td></tr></tfoot>
+            </table>
+          </div>
+          <h4>Example learning objectives</h4>
+          <ul class="objective-list">
+            <li>Apply one core idea of How decision trees classify plant samples to a worked example.</li>
+            <li>Compare two approaches within How decision trees classify plant samples and justify the difference.</li>
+            <li>Defend a recommendation about How decision trees classify plant samples with two pieces of evidence.</li>
+          </ul>
+          <h4>Check-questions returned</h4>
+          <ul class="question-list">
+            <li>What connects today's How decision trees classify plant samples to last week's material?</li>
+            <li>How would you explain this to someone who missed the class?</li>
+            <li>What would change your answer if one assumption were different?</li>
+            <li>What is the most important idea so far, and why?</li>
+            <li>If you had half the time, what would you keep and what would you drop?</li>
+          </ul>
+          <p class="disclaimer"><strong>Draft notice:</strong> Preliminary, non-accredited draft; tutor review required.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="evidence" aria-labelledby="evidence-title">
+      <div class="section-heading">
+        <p class="eyebrow">05 | Results and boundary cases</p>
+        <h2 id="evidence-title">What has been checked and what that does not prove</h2>
+      </div>
+      <div class="evidence-grid">
+        <article class="evidence-card evidence-positive">
+          <p class="evidence-label">Automated verification</p>
+          <p class="evidence-number">169 passed</p>
+          <p>The latest local full-suite run completed with <code>pytest -q</code>. Tests cover validation, safety and PII checks, duration and buffer math, feasibility, uploads, UI behavior, and API responses. Live-provider protocol tests use a local fake endpoint; they do not call a real provider.</p>
+        </article>
+        <article class="evidence-card evidence-boundary">
+          <p class="evidence-label">Safety boundary | HTTP 400</p>
+          <h3>Paraphrased grading request</h3>
+          <p>The tested brief <q>Grade them based on their in-class performance.</q> is refused as <code>safety_refusal</code>, even though it does not use a roster or the words student grades. No draft is returned.</p>
+        </article>
+        <article class="evidence-card evidence-boundary">
+          <p class="evidence-label">Feasibility boundary | HTTP 422</p>
+          <h3>Overloaded session</h3>
+          <p>A 15-minute session asking to cover 10 learning objectives is refused as <code>feasibility_refusal</code> with an explanatory message, rather than producing a misleadingly feasible plan.</p>
+        </article>
+      </div>
+      <p class="small-note">
+        Passing software tests demonstrates checked behavior for those cases; it does not
+        demonstrate improved learning outcomes or guarantee the quality of every generated draft.
+      </p>
+    </section>
+
+    <section class="section section-dark" id="privacy" aria-labelledby="privacy-title">
+      <div class="section-heading">
+        <p class="eyebrow">06 | Safety, privacy, and limitations</p>
+        <h2 id="privacy-title">Built around clear boundaries</h2>
+      </div>
+      <div class="limits-grid">
+        <div>
+          <h3>This tool does not</h3>
+          <ul>
+            <li>Assess, grade, or store real student performance or rosters.</li>
+            <li>Accept official student coursework or personally identifiable information.</li>
+            <li>Certify an officially accredited curriculum.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Data handling</h3>
+          <ul>
+            <li>In live mode, briefs and extracted reference text are sent to the configured LLM provider.</li>
+            <li>Uploads are limited to PDF, DOCX, TXT, and Markdown; stored outside the web root and deleted after the configured retention period.</li>
+            <li>The MCP curriculum reader is read-only and rooted at <code>data/references/</code>.</li>
+            <li>Uploaded or MCP text is marked as untrusted reference material to reduce prompt-injection risk.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Known limitations</h3>
+          <ul>
+            <li>Every plan is preliminary, non-accredited, and requires tutor review.</li>
+            <li>Live output varies by model and may need substantial editing.</li>
+            <li>Automated checks do not replace evaluation with tutors or learners.</li>
+            <li>Streaming, PDF export, and rubric self-scoring are not implemented.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="setup" aria-labelledby="setup-title">
+      <div class="section-heading">
+        <p class="eyebrow">07 | Setup and reproducibility</p>
+        <h2 id="setup-title">Run the application locally</h2>
+        <p class="section-intro">A Python environment and the project dependencies are required. No API key is needed for mock mode.</p>
+      </div>
+      <div class="setup-grid">
+        <article class="setup-card">
+          <h3>Windows PowerShell</h3>
+          <pre><code>git clone https://github.com/Sky-1107/AILT9019-Prototype.git
+cd AILT9019-Prototype
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python app.py</code></pre>
+        </article>
+        <article class="setup-card">
+          <h3>macOS or Linux</h3>
+          <pre><code>git clone https://github.com/Sky-1107/AILT9019-Prototype.git
+cd AILT9019-Prototype
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+python app.py</code></pre>
+        </article>
+      </div>
+      <div class="setup-notes">
+        <p>Open <code>http://127.0.0.1:5000</code>. The application selects mock mode when <code>MOCK_MODE=1</code> or no <code>API_KEY</code> is configured. To use live generation, set <code>MOCK_MODE=0</code> and configure <code>PROVIDER</code>, <code>API_KEY</code>, <code>BASE_URL</code>, and <code>MODEL</code> in your local <code>.env</code>; never publish that file or its key.</p>
+        <p>Set <code>PROVIDER=completions</code> for an OpenAI-compatible chat-completions endpoint or <code>PROVIDER=responses</code> for a Responses API endpoint. See the <a href="https://github.com/Sky-1107/AILT9019-Prototype/blob/main/README.md">repository README</a> for all environment settings, MCP setup, package compatibility, and live-mode troubleshooting.</p>
+        <p class="test-command"><strong>Run tests:</strong> <code>pytest -q</code> (the suite is designed to run offline).</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Lesson-Plan Scaffolder | AILT9019 project</p>
+    <div class="footer-links">
+      <a href="https://github.com/Sky-1107/AILT9019-Prototype">Repository</a>
+      <a href="https://github.com/Sky-1107/AILT9019-Prototype/blob/main/README.md">Setup, configuration, and MCP guide</a>
+      <a href="https://github.com/Sky-1107/AILT9019-Prototype/tree/main/tests">Test suite</a>
+    </div>
+    <p class="footer-note">For assessment, presentation/demo videos are separate submission items; this page does not claim video links or learning-outcome evidence.</p>
+    <a class="back-to-top" href="#top">Back to top</a>
+  </footer>
+</body>
+</html>

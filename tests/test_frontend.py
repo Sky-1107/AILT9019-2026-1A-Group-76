@@ -45,3 +45,26 @@ def test_no_inner_html_assignment():
 def test_no_cdn_references():
     assert not re.search(r"https?://", JS), "main.js must not reference remote URLs"
     assert not re.search(r"(src|href)=\"https?://", HTML), "index.html must not use CDNs"
+
+
+def test_runtime_configuration_card_is_between_boundary_and_brief():
+    assert HTML.index('id="boundary-title"') < HTML.index('id="runtime-glossary"')
+    assert HTML.index('id="runtime-glossary"') < HTML.index('id="runtime-title"')
+    assert HTML.index('id="runtime-title"') < HTML.index('id="brief-title"')
+    assert 'id="runtime-settings"' in HTML
+    assert re.search(
+        r'<aside class="runtime-glossary" id="runtime-glossary"\s+'
+        r'aria-labelledby="runtime-glossary-title" hidden>',
+        HTML,
+    )
+
+
+def test_runtime_glossary_is_hidden_in_mock_and_shown_live():
+    mock_branch = JS.split('if (data.mode === "mock")', 1)[1].split(
+        'if (data.mode !== "live")', 1
+    )[0]
+    live_branch = JS.split('runtimeMode.textContent = "Live mode";', 1)[1].split(
+        'demoBadge.hidden = true;', 1
+    )[0]
+    assert "runtimeGlossary.hidden = true;" in mock_branch
+    assert "runtimeGlossary.hidden = false;" in live_branch

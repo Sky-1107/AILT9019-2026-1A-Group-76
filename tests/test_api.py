@@ -27,6 +27,14 @@ class TestHealth:
         assert body["status"] == "ok"
         assert body["mode"] == "mock"
         assert "mcp_enabled" in body
+        assert not {
+            "model",
+            "temperature",
+            "timeout_seconds",
+            "max_output_tokens",
+            "api_key",
+            "base_url",
+        } & body.keys()
 
 
 class TestPositiveGeneration:
@@ -44,7 +52,8 @@ class TestPositiveGeneration:
         assert plan["usable_minutes"] == plan["duration_minutes"] - plan["buffer_minutes"]
         assert sum(b["minutes"] for b in plan["blocks"]) == plan["usable_minutes"]
         assert len(plan["blocks"]) == 4
-        assert len(plan["check_questions"]) >= 3
+        assert len(plan["check_questions"]) >= 4
+        assert all(1 <= len(b["check_questions"]) <= 3 for b in plan["blocks"])
         assert plan["disclaimer"] == "Preliminary, non-accredited draft; tutor review required."
         assert plan["disclaimer"] in body["draft"]
         assert body["meta"]["mode"] == "mock"
@@ -72,13 +81,28 @@ class TestPositiveGeneration:
             data=form,
             content_type="multipart/form-data",
         ).get_json()
-        assert as_json["plan"]["blocks"] == as_form["plan"]["blocks"]
+        # Time allocation is deterministic; wording is varied per generation.
+        assert [b["phase"] for b in as_json["plan"]["blocks"]] == [
+            b["phase"] for b in as_form["plan"]["blocks"]
+        ]
+        assert [b["minutes"] for b in as_json["plan"]["blocks"]] == [
+            b["minutes"] for b in as_form["plan"]["blocks"]
+        ]
         assert as_json["status"] == as_form["status"] == "mock"
 
-    def test_deterministic(self, client):
-        first = client.post("/api/generate", json=payload()).get_json()
-        second = client.post("/api/generate", json=payload()).get_json()
-        assert first["draft"] == second["draft"]
+    def test_varies_between_calls_but_structure_is_stable(self, client):
+        # Mock mode re-rolls content each call so "Regenerate" shows a fresh take.
+        bodies = [
+            client.post("/api/generate", json=payload()).get_json() for _ in range(4)
+        ]
+        assert len({body["draft"] for body in bodies}) >= 2, "expected varied mock output"
+        # ...while the fixed skeleton (allocation, sections, disclaimer) holds.
+        for body in bodies:
+            plan = body["plan"]
+            assert sum(b["minutes"] for b in plan["blocks"]) == plan["usable_minutes"]
+            assert 2 <= len(plan["objectives"]) <= 5
+            assert all(1 <= len(b["check_questions"]) <= 3 for b in plan["blocks"])
+            assert plan["disclaimer"] in body["draft"]
 
 
 class TestRefusals:
@@ -92,6 +116,15 @@ class TestRefusals:
         assert body["error"]["code"] == "safety_refusal"
         assert "draft" not in body
         assert "student grades" not in body["error"]["message"]
+
+    def test_reworded_grading_refusal_400(self, client):
+        # Intent rules must catch paraphrases that avoid the phrase list.
+        response = client.post(
+            "/api/generate",
+            json=payload(brief="Grade them based on their in-class performance."),
+        )
+        assert response.status_code == 400
+        assert response.get_json()["error"]["code"] == "safety_refusal"
 
     def test_pii_refusal_400(self, client):
         response = client.post(

@@ -338,10 +338,22 @@ def validate_generated_plan(plan: dict) -> list[str]:
     usable = plan.get("usable_minutes")
     if not blocks:
         warnings.append("The draft has no time-allocation blocks.")
-    elif isinstance(usable, int) and sum(b.get("minutes", 0) for b in blocks) != usable:
+    elif len(blocks) != 4:
+        warnings.append("The draft does not contain the required four time-allocation blocks.")
+    if blocks and isinstance(usable, int) and sum(
+        b.get("minutes", 0) for b in blocks
+    ) != usable:
         warnings.append(
             "Block minutes do not sum to the usable time; the allocation was repaired "
             "against the Core Concept block."
+        )
+    if blocks and any(not block.get("check_questions") for block in blocks):
+        warnings.append(
+            "One or more time-allocation blocks have no tutor check-question."
+        )
+    if any(len(block.get("check_questions") or []) > 3 for block in blocks):
+        warnings.append(
+            "One or more time-allocation blocks have more than 3 tutor check-questions."
         )
     if not plan.get("check_questions"):
         warnings.append("The draft has no tutor check-questions.")
@@ -353,7 +365,12 @@ def validate_generated_plan(plan: dict) -> list[str]:
 
 
 def repair_block_minutes(plan: dict) -> bool:
-    """Adjust the Core Concept block once so blocks sum to usable time. Return success."""
+    """Adjust one block once so blocks sum to usable time. Return success.
+
+    The absorbing block is the core/teaching phase when a model used its own
+    phase names ("Starter", "Explanation", "Plenary"), else the largest block,
+    so a non-standard table is still repairable instead of failing to fallback.
+    """
     blocks = plan.get("blocks") or []
     usable = plan.get("usable_minutes")
     if not blocks or not isinstance(usable, int) or usable < len(blocks) * 5:
@@ -361,11 +378,14 @@ def repair_block_minutes(plan: dict) -> bool:
     total = sum(b.get("minutes", 0) for b in blocks)
     if total == usable:
         return True
+    core = None
     for block in blocks:
-        if block.get("phase") == "Core Concept":
-            block["minutes"] = block.get("minutes", 0) + (usable - total)
-            return block["minutes"] >= 5
-    return False
+        if re.search(r"core|concept|main|teach|explain|develop", str(block.get("phase", "")), re.I):
+            core = block
+            break
+    target = core or max(blocks, key=lambda b: b.get("minutes", 0))
+    target["minutes"] = target.get("minutes", 0) + (usable - total)
+    return target["minutes"] >= 5
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +417,160 @@ def _heading_level(line: str) -> tuple[int, str] | None:
     return None
 
 
+_LIST_START_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_WRAP_QUOTES = "\"\u201c\u201d\u2018\u2019'`"
+
+
+def _clean_item(text: str) -> str:
+    """Trim markdown emphasis and a single pair of wrapping quotes from an item."""
+    text = text.strip().strip("*_` ").strip()
+    if len(text) >= 2 and text[0] in _WRAP_QUOTES and text[-1] in _WRAP_QUOTES:
+        text = text[1:-1].strip()
+    return text
+_UNFOLDABLE_RE = re.compile(
+    r"^\s*(?:#|\||<<<|>\s|UNTRUSTED_REFERENCE_MATERIAL|---|\[)"  # headings, tables, fences, links
+)
+
+
+def _fold_wrapped_lines(lines: list[str]) -> list[str]:
+    """Join soft-wrapped list items into one logical line.
+
+    Models frequently wrap a long objective or check-question across several
+    physical lines. Without folding, the parser reads only the first line and
+    drops the rest, producing truncated text such as a question that ends on a
+    dangling word ("...same leaf? Say"). A non-blank line that is not itself a
+    heading/table/list/delimiter, and directly follows a list item, is a
+    continuation and is appended to that item separated by a single space.
+    """
+    folded: list[str] = []
+    for raw in lines:
+        line = raw.rstrip()
+        stripped = line.strip()
+        if (
+            folded
+            and stripped
+            and _LIST_START_RE.match(folded[-1])
+            and not _LIST_START_RE.match(line)
+            and not _UNFOLDABLE_RE.match(line)
+        ):
+            folded[-1] = f"{folded[-1].rstrip()} {stripped}"
+            continue
+        folded.append(line)
+    return folded
+
+
+# Durations written inline rather than in a table: "**Time:** 5 minutes",
+# "(10 min)", "Duration: 8 mins", "5m". Used by the salvage parser.
+_INLINE_TIME_RE = re.compile(
+    r"(?:\*\*|\b)?(?:time|duration|length|mins?|minutes?)\b[^\d]{0,4}(\d{1,3})\s*"
+    r"(?:min(?:ute)?s?|m\b)",
+    re.IGNORECASE,
+)
+_PAREN_TIME_RE = re.compile(r"\(\s*(\d{1,3})\s*(?:min(?:ute)?s?|m)\s*\)", re.IGNORECASE)
+
+
+_META_PHASE_RE = re.compile(r"\b(?:buffer|total)\b", re.IGNORECASE)
+
+
+def _is_meta_phase(name: str) -> bool:
+    """True for rows/phases that reserve or total time rather than teach it."""
+    return bool(_META_PHASE_RE.search(name or ""))
+
+
+def _phase_from_heading(title: str) -> str:
+    """Strip leading numbering ('1. Starter') and trailing emphasis from a heading."""
+    cleaned = re.sub(r"^\s*\d+[.)\-]\s*", "", title)
+    cleaned = re.sub(r"[*_`]+$", "", cleaned).strip(" :")
+    return cleaned
+
+
+def _salvage_blocks(markdown: str) -> list[dict]:
+    """Recover timed blocks when the draft has no '## Time Allocation' table.
+
+    Tracks the nearest preceding heading as the phase name and takes the first
+    inline/parenthetical duration under it. This is what lets a model that invents
+    its own schema ('## 1. Starter Activity' + '**Time:** 5 minutes') still parse.
+    """
+    blocks: list[dict] = []
+    phase = ""
+    seen_phases: set[str] = set()
+    total_re = re.compile(r"^\s*\*{0,2}(?:total\s+)?duration\b", re.IGNORECASE)
+    for raw_line in _fold_wrapped_lines(markdown.splitlines()):
+        line = raw_line.strip()
+        heading = _heading_level(line)
+        if heading:
+            # Only top-level headings name phases; deeper headings ("### Teacher
+            # Action") must not steal the attribution of their parent's time.
+            if heading[0] <= 2:
+                phase = _phase_from_heading(heading[1])
+            continue
+        if not phase or phase.lower() in seen_phases:
+            continue
+        if total_re.match(line):
+            continue  # the overall lesson duration, not a block
+        match = _INLINE_TIME_RE.search(line) or _PAREN_TIME_RE.search(line)
+        if not match:
+            continue
+        minutes = int(match.group(1))
+        if not 1 <= minutes <= 300:
+            continue
+        if _is_meta_phase(phase):
+            continue  # a reserved buffer section is not a taught block
+        seen_phases.add(phase.lower())
+        blocks.append(
+            {
+                "id": f"B{len(blocks) + 1}",
+                "phase": phase,
+                "minutes": minutes,
+                "tutor_focus": "",
+                "check_questions": [],
+            }
+        )
+    return blocks
+
+
+def _salvage_questions(markdown: str) -> list[str]:
+    """Collect check-questions from anywhere (headings may not match schema).
+
+    Reasoning models emit questions as bullets, numbered items, or plain
+    sentences, sometimes with a leading "Check:"/"Ask:" label. Accept any of
+    those when the line is a self-contained question.
+    """
+    questions: list[str] = []
+    for raw_line in _fold_wrapped_lines(markdown.splitlines()):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = _CHECK_RE.match(line)
+        body = match.group(1).strip() if match else line
+        body = re.sub(r"^\**\s*(?:check|ask|question)\s*[:\-]\s*\**\s*", "", body, flags=re.I)
+        body = _clean_item(body)
+        if not body.endswith("?"):
+            continue
+        if not 8 <= len(body) <= 200 or body in questions:
+            continue
+        questions.append(body)
+        if len(questions) >= 8:
+            break
+    return questions
+
+
+def distribute_check_questions(blocks: list[dict], questions: list[str]) -> None:
+    """Assign up to three questions per block while preserving their order."""
+    for block in blocks:
+        block["check_questions"] = []
+    if not blocks:
+        return
+
+    assigned_count = min(len(questions), len(blocks) * 3)
+    per_block, remainder = divmod(assigned_count, len(blocks))
+    cursor = 0
+    for index, block in enumerate(blocks):
+        count = per_block + (1 if index < remainder else 0)
+        block["check_questions"] = questions[cursor : cursor + count]
+        cursor += count
+
+
 def parse_markdown_to_plan(markdown: str, meta: dict) -> dict:
     """Reconstruct the structured plan from the agent's Markdown draft.
 
@@ -415,7 +589,8 @@ def parse_markdown_to_plan(markdown: str, meta: dict) -> dict:
     sources: list[dict] = []
     section = ""
 
-    for raw_line in (markdown or "").splitlines():
+    lines = _fold_wrapped_lines((markdown or "").splitlines())
+    for raw_line in lines:
         line = raw_line.rstrip()
         heading = _heading_level(line)
         if heading:
@@ -454,6 +629,8 @@ def parse_markdown_to_plan(markdown: str, meta: dict) -> dict:
                 cells = _split_table_row(line)
                 if cells and cells[0].lower() in {"phase", "phase name"}:
                     continue
+                if cells and _is_meta_phase(cells[0]):
+                    continue  # buffer/total rows are not taught blocks
                 minutes_match = re.search(r"\d+", cells[1] if len(cells) > 1 else "")
                 if minutes_match and cells[0]:
                     blocks.append(
@@ -472,7 +649,8 @@ def parse_markdown_to_plan(markdown: str, meta: dict) -> dict:
             match = _OBJECTIVE_LINE_RE.match(line)
             if match:
                 lo_id, text = match.group(1), match.group(2).strip()
-                text = re.sub(r"\((?:bloom|level):?\s*([a-z]+)\)\s*$", "", text, flags=re.I).strip()
+                text = re.sub(r"\((?:bloom|level):?\s*([a-z]+)\)\s*$", "", text, flags=re.I)
+                text = _clean_item(text)
                 bloom_match = re.search(r"\((?:bloom|level):?\s*([a-z]+)\)\s*$", line, re.I)
                 bloom = (
                     bloom_match.group(1).lower()
@@ -491,7 +669,7 @@ def parse_markdown_to_plan(markdown: str, meta: dict) -> dict:
         if section == "questions":
             match = _CHECK_RE.match(line)
             if match:
-                check_questions.append(match.group(1).strip())
+                check_questions.append(_clean_item(match.group(1)))
             continue
 
         if section == "outline":
@@ -512,14 +690,18 @@ def parse_markdown_to_plan(markdown: str, meta: dict) -> dict:
                     sources.append({"label": body, "snippet": ""})
             continue
 
-    # Distribute check questions across blocks at transition points (1-3 each).
+    # Salvage pass: a model that ignores the schema (custom headings, inline
+    # "**Time:** 5 minutes" durations, question bullets elsewhere) is still parsed
+    # here rather than falling back or forcing a costly corrective retry.
+    if not blocks:
+        blocks = _salvage_blocks(markdown or "")
+    if not check_questions:
+        check_questions = _salvage_questions(markdown or "")
+
+    # Distribute questions so every block gets a transition prompt when enough
+    # questions were supplied, with no block receiving more than 3.
     if blocks and check_questions:
-        per_block = max(1, min(3, len(check_questions) // len(blocks)))
-        index = 0
-        for block in blocks:
-            take = min(per_block, max(1, len(check_questions) - index))
-            block["check_questions"] = check_questions[index : index + take]
-            index += take
+        distribute_check_questions(blocks, check_questions)
 
     plan = make_plan_skeleton(
         topic=topic,

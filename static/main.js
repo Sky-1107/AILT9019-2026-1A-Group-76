@@ -19,6 +19,14 @@
     const refusalCode = document.getElementById("refusal-code");
     const refusalMessage = document.getElementById("refusal-message");
     const demoBadge = document.getElementById("demo-badge");
+    const runtimeGlossary = document.getElementById("runtime-glossary");
+    const runtimeMode = document.getElementById("runtime-mode");
+    const runtimeNote = document.getElementById("runtime-note");
+    const runtimeSettings = document.getElementById("runtime-settings");
+    const runtimeModel = document.getElementById("runtime-model");
+    const runtimeTemperature = document.getElementById("runtime-temperature");
+    const runtimeTimeout = document.getElementById("runtime-timeout");
+    const runtimeMaxTokens = document.getElementById("runtime-max-tokens");
     const resultActions = document.getElementById("result-actions");
     const resultTabs = document.getElementById("result-tabs");
 
@@ -52,7 +60,7 @@
 
     const sampleBrief = {
         topic: "Fraud detection with decision trees",
-        duration: "50 mins",
+        duration: "50",
         target_level: "1st Year Undergrad",
         brief:
             "Learners compare two rule-based ways to flag suspicious transactions and practise " +
@@ -412,38 +420,32 @@
         }
     });
 
-    const workspaceGrid = document.querySelector(".workspace-grid");
-
     /* ---------------- result visibility ---------------- */
 
     function showResults() {
         resultTabs.hidden = false;
         resultActions.hidden = false;
-        // Stack the layout so the three workspace columns get the full page width.
-        if (workspaceGrid) workspaceGrid.classList.add("has-results");
         selectTab(tabWorkspace);
     }
 
     function hideResults() {
         resultTabs.hidden = true;
         resultActions.hidden = true;
-        if (workspaceGrid) workspaceGrid.classList.remove("has-results");
         currentPlan = null;
         // demoBadge is intentionally left alone: it reflects the server mode,
-        // which is known from page load (see refreshModeBadge).
+        // which is shown in the runtime panel from page load.
     }
 
     /* ---------------- request ---------------- */
 
-    // Client-side give-up: the server's provider timeout is 60s with retries, so
-    // 150s is comfortably beyond any healthy live call.
+    // Browser-side safety cap; the provider also has its own configurable timeout.
     const REQUEST_TIMEOUT_MS = 150000;
 
     async function submitGeneration() {
         hideRefusal();
         setLoading(true);
         const startedAt = Date.now();
-        setStatus("Generating your lesson draft… Mock mode is instant; a live model can take up to a minute.", null);
+        setStatus("Generating your lesson draft… Mock mode is instant; live generation may take longer than a minute.", null);
         const elapsedTimer = window.setInterval(() => {
             const seconds = Math.round((Date.now() - startedAt) / 1000);
             setStatus("Still generating… " + seconds + "s elapsed.", null);
@@ -485,7 +487,7 @@
                     "provider_error",
                     "The request timed out after " + REQUEST_TIMEOUT_MS / 1000 + " seconds. " +
                     "The server may be running in live mode with an unreachable provider or a " +
-                    "missing OPENAI_BASE_URL. Check the .env settings and restart python app.py, " +
+                    "missing BASE_URL. Check the .env settings and restart python app.py, " +
                     "or set MOCK_MODE=1 for an instant offline draft."
                 );
                 setStatus("The request timed out. See the details panel.", "error");
@@ -517,20 +519,51 @@
         }
     });
 
-    /* Show the Demo mode badge as soon as the page learns the server runs in mock
-       mode — checked at load via /api/health, and re-confirmed after each response. */
-    async function refreshModeBadge() {
+    function renderRuntimeInfo(data) {
+        if (data.mode === "mock") {
+            runtimeMode.textContent = "Mock mode";
+            runtimeMode.className = "runtime-mode is-mock";
+            runtimeNote.textContent =
+                "Drafts use the offline mock generator; live model settings are inactive.";
+            runtimeSettings.hidden = true;
+            runtimeGlossary.hidden = true;
+            demoBadge.hidden = false;
+            return;
+        }
+        if (data.mode !== "live") {
+            throw new Error("The server returned an unknown generation mode.");
+        }
+
+        runtimeMode.textContent = "Live mode";
+        runtimeMode.className = "runtime-mode is-live";
+        runtimeNote.textContent = "Drafts use the configured live language model.";
+        runtimeSettings.hidden = false;
+        runtimeGlossary.hidden = false;
+        runtimeModel.textContent = String(data.model || "Unavailable");
+        runtimeTemperature.textContent = String(data.temperature);
+        runtimeTimeout.textContent = String(data.timeout_seconds) + " seconds";
+        runtimeMaxTokens.textContent = String(data.max_output_tokens);
+        demoBadge.hidden = true;
+    }
+
+    /* Read the effective mode and safe-to-display generation settings from Flask. */
+    async function refreshRuntimeInfo() {
         try {
             const response = await fetch("/api/health");
-            if (response.ok) {
-                const data = await response.json();
-                demoBadge.hidden = data.mode !== "mock";
+            if (!response.ok) {
+                throw new Error("The runtime settings could not be loaded.");
             }
+            renderRuntimeInfo(await response.json());
         } catch {
-            /* health unavailable: keep the badge as-is */
+            runtimeMode.textContent = "Mode unavailable";
+            runtimeMode.className = "runtime-mode is-unavailable";
+            runtimeNote.textContent = "Could not load the current runtime settings.";
+            runtimeSettings.hidden = true;
+            runtimeGlossary.hidden = true;
+            demoBadge.hidden = true;
         }
     }
-    refreshModeBadge();
+    refreshRuntimeInfo();
 
     regenerateButton.addEventListener("click", () => submitGeneration());
 
@@ -552,7 +585,7 @@
     const presets = {
         stem: {
             topic: "Problem-solving with Newton's method",
-            duration: "50 mins",
+            duration: "50",
             target_level: "1st Year Undergrad STEM",
             brief: "Learners iteratively approximate a root using Newton's method, starting from a graph sketch. Worked example first, then pairs solve a second function and compare convergence behaviour.",
             activity_types: "worked example, pair problem-solving",
@@ -561,7 +594,7 @@
         },
         essay: {
             topic: "Argument structure in persuasive essays",
-            duration: "60 mins",
+            duration: "60",
             target_level: "2nd Year Humanities",
             brief: "Discuss how claims, evidence, and warrants combine in a persuasive essay. Learners annotate a sample paragraph in small groups, then draft one counter-argument paragraph individually.",
             activity_types: "group discussion, annotation, individual drafting",
@@ -570,7 +603,7 @@
         },
         lab: {
             topic: "Titration technique and endpoint detection",
-            duration: "90 mins",
+            duration: "90",
             target_level: "1st Year Laboratory Science",
             brief: "Demonstrate a strong acid-strong base titration, highlighting burette handling and endpoint judgement. Learners then repeat the procedure in pairs and record three concordant titres.",
             activity_types: "demonstration, hands-on lab pairs",

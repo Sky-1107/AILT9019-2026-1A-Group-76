@@ -1,15 +1,21 @@
 """All ``pi_python`` usage lives here.
 
-Builds the live agent (``OpenAICompletionsProvider`` + ``Agent``), performs the
-deterministic ``.pi`` injection (app instructions -> context -> SKILL.md -> MCP
-config -> untrusted reference -> brief), orchestrates mock/live selection and the
-one corrective retry, and maps every provider failure to ``ProviderError`` with a
-safe message that never leaks the API key or a traceback.
+Builds the live agent (``OpenAICompletionsProvider`` or ``OpenAIProvider`` +
+``Agent``), performs the deterministic ``.pi`` injection (app instructions ->
+context -> SKILL.md -> MCP config -> untrusted reference -> brief), orchestrates
+mock/live selection and the one corrective retry, and maps every provider failure
+to ``ProviderError`` with a safe message that never leaks the API key or a
+traceback.
+
+Provider selection is driven by the ``PROVIDER`` env var:
+  * ``completions`` -> ``OpenAICompletionsProvider`` (POST /chat/completions)
+  * ``responses`` (default) -> ``OpenAIProvider`` (POST /responses, OpenAI Responses API)
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 import warnings as _warnings
 from dataclasses import dataclass, field
@@ -62,19 +68,78 @@ def mcp_enabled() -> bool:
     return _env_flag("MCP_ENABLED", "1")
 
 
+_STATUS_RE = re.compile(r"HTTP (\d{3})")
+
+
+def classify_provider_failure(detail: str) -> tuple[str, dict]:
+    """Map provider failure text to a safe, actionable message + details.
+
+    The API key and raw traceback never reach the client; only the HTTP status
+    and a category are surfaced. Authentication failures are the most common
+    misconfiguration, so they get explicit .env guidance.
+    """
+    match = _STATUS_RE.search(detail or "")
+    status = int(match.group(1)) if match else None
+    lowered = (detail or "").lower()
+    details: dict = {}
+    if status is not None:
+        details["http_status"] = status
+    if status == 401 or "invalid api-key" in lowered or "authentication" in lowered:
+        message = (
+            "The language model provider rejected the API key (HTTP 401). Check that "
+            "API_KEY in .env is a valid key for the endpoint in BASE_URL, then restart "
+            "python app.py. Set MOCK_MODE=1 to run without a key."
+        )
+        details["reason"] = "authentication"
+    elif status == 403 or "permission" in lowered or "forbidden" in lowered:
+        message = (
+            "The language model provider refused this request (HTTP 403). The key may "
+            "lack access to this model or endpoint; verify MODEL and BASE_URL in .env."
+        )
+        details["reason"] = "authorization"
+    elif status == 404 or "not found" in lowered or "model_not_found" in lowered:
+        message = (
+            "The language model provider could not find the requested model (HTTP 404). "
+            "Check MODEL and BASE_URL in .env against the models your endpoint serves."
+        )
+        details["reason"] = "unknown_model"
+    elif status == 429 or "rate limit" in lowered or "quota" in lowered:
+        message = (
+            "The language model provider rate-limited the request (HTTP 429). Try again "
+            "shortly, or check your account quota."
+        )
+        details["reason"] = "rate_limited"
+    elif status is not None and 500 <= status < 600:
+        message = (
+            f"The language model provider returned a server error (HTTP {status}). "
+            "Please try again shortly."
+        )
+        details["reason"] = "provider_server_error"
+    else:
+        message = (
+            "The language model provider returned an incomplete response. Please try "
+            "again, or set MOCK_MODE=1 to run without a live model."
+        )
+        details["reason"] = "incomplete"
+    return message, details
+
+
 class AgentRunner:
     """Owns provider/agent construction and the deterministic ``.pi`` injection."""
 
     def __init__(self) -> None:
         self.api_key = (os.environ.get("API_KEY") or "").strip()
-        self.base_url = (os.environ.get("BASE_URL") or "https://api.openai.com/v1").strip()
-        self.model_id = (os.environ.get("MODEL") or "gpt-4o-mini").strip()
+        self.base_url = (os.environ.get("BASE_URL") or "https://api.hku.hk/openai/student/v1").strip()
+        self.model_id = (os.environ.get("MODEL") or "gpt-4.1-nano").strip()
+        self.provider_kind = (os.environ.get("PROVIDER") or "responses").strip().lower()
+        if self.provider_kind not in ("completions", "responses"):
+            self.provider_kind = "responses"
         try:
-            self.temperature = float(os.environ.get("TEMPERATURE", "0"))
+            self.temperature = float(os.environ.get("TEMPERATURE", "0.4"))
         except ValueError:
             self.temperature = 0.0
         try:
-            self.timeout_seconds = float(os.environ.get("TIMEOUT_SECONDS", "60"))
+            self.timeout_seconds = float(os.environ.get("TIMEOUT_SECONDS", "90"))
         except ValueError:
             self.timeout_seconds = 60.0
         try:
@@ -161,7 +226,7 @@ class AgentRunner:
         from pi_python.errors import PiError
         from pi_python.messages import AssistantMessage, TextContent
         from pi_python.plugins import load_plugins
-        from pi_python.providers import OpenAICompletionsProvider
+        from pi_python.providers import OpenAICompletionsProvider, OpenAIProvider
         from pi_python.providers.transport import HTTPTransport
 
         started = time.perf_counter()
@@ -169,13 +234,38 @@ class AgentRunner:
 
         try:
             transport = HTTPTransport(timeout=self.timeout_seconds)
-            provider = OpenAICompletionsProvider(
-                base_url=self.base_url,
-                api_key=self.api_key,
-                name="openai-completions",
-                transport=transport,
-            )
-            model = provider.model(self.model_id, max_tokens=self.max_output_tokens)
+            if self.provider_kind == "responses":
+                provider = OpenAIProvider(
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    transport=transport,
+                )
+                # OpenAIProvider has no .model() helper; declare the ModelInfo
+                # directly with api="openai-responses" and provider="openai".
+                from pi_python.models import ModelInfo
+
+                model = ModelInfo(
+                    id=self.model_id,
+                    provider="openai",
+                    api="openai-responses",
+                    name=self.model_id,
+                    context_window=128000,
+                    max_tokens=self.max_output_tokens,
+                    reasoning=False,
+                    input=("text",),
+                    thinking_level_map={},
+                    cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    compat={},
+                    base_url=self.base_url,
+                )
+            else:
+                provider = OpenAICompletionsProvider(
+                    base_url=self.base_url,
+                    api_key=self.api_key,
+                    name="openai-completions",
+                    transport=transport,
+                )
+                model = provider.model(self.model_id, max_tokens=self.max_output_tokens)
         except Exception as exc:
             raise ProviderError(
                 "The configured language model provider could not be started with the "
@@ -221,11 +311,16 @@ class AgentRunner:
                             "The MCP curriculum reader did not start; generation continued "
                             "without it."
                         )
+                    agent_options = {"temperature": self.temperature}
+                    if self.api_key:
+                        agent_options["headers"] = {
+                            "api-key": self.api_key,
+                        }
                     agent = plugin_set.agent(
                         system_prompt=system_prompt,
                         provider=provider,
                         model=model,
-                        options={"temperature": self.temperature},
+                        options=agent_options,
                     )
                     if not isinstance(agent, Agent):
                         raise ProviderError(
@@ -235,19 +330,20 @@ class AgentRunner:
         except ProviderError:
             raise
         except PiError as exc:
-            raise ProviderError(
-                "The language model provider failed to complete the request. Please try "
-                "again shortly."
-            ) from exc
+            failure_message, failure_details = classify_provider_failure(str(exc))
+            raise ProviderError(failure_message, details=failure_details) from exc
         except (OSError, TimeoutError, ValueError) as exc:
             raise ProviderError(
                 "The language model provider could not be reached. Please try again shortly."
             ) from exc
 
         if run_result.status != "completed":
-            raise ProviderError(
-                "The language model provider returned an incomplete response. Please try again."
+            reason = getattr(run_result, "stop_reason", None) or ""
+            detail_text = " ".join(
+                [str(reason), *(str(e) for e in (run_result.errors or []))]
             )
+            failure_message, failure_details = classify_provider_failure(detail_text)
+            raise ProviderError(failure_message, details=failure_details)
 
         text = ""
         for message in reversed(run_result.messages):
@@ -264,7 +360,7 @@ class AgentRunner:
         usage = run_result.usage or {}
         meta = {
             "model": self.model_id,
-            "provider": "openai-completions",
+            "provider": "openai-responses" if self.provider_kind == "responses" else "openai-completions",
             "elapsed_ms": elapsed_ms,
             "mode": "live",
             "mcp_connected": mcp_available,
@@ -309,12 +405,19 @@ def build_user_prompt(payload: dict) -> str:
 def _structure_problems(plan: dict) -> list[str]:
     """Section-level problems judged on the raw parse (before server-side repair)."""
     problems = []
-    if len(plan.get("objectives", [])) < 2:
+    objectives = plan.get("objectives", [])
+    if len(objectives) < 2:
         problems.append("2-5 learning objectives under '## Learning Objectives'")
+    elif len(objectives) > 5:
+        problems.append("no more than 5 learning objectives")
     if not plan.get("blocks"):
         problems.append("a '## Time Allocation' Markdown table with minutes per phase")
+    elif len(plan["blocks"]) != 4:
+        problems.append("four time-allocation blocks")
     if not plan.get("check_questions"):
         problems.append("tutor check-questions under '## Tutor Check-Questions'")
+    elif any(not block.get("check_questions") for block in plan.get("blocks", [])):
+        problems.append("at least one tutor check-question for every time-allocation block")
     return problems
 
 
