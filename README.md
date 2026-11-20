@@ -120,30 +120,6 @@ To check the MCP integration alone:
 python -m pytest -q tests/test_api_live.py::TestLiveMcp::test_mcp_reader_starts_and_connects
 ```
 
-The live adapter is verified with `pi-python-core==0.11.0` and `mcp==2.3.0`. These
-are the relevant API shapes used (abridged where marked):
-
-```text
-Agent(..., provider=..., model=..., options=..., system_prompt=...)
-OpenAICompletionsProvider(*, base_url, name="openai-compatible", **kwargs)
-OpenAIProvider(*, base_url="https://api.openai.com/v1", **kwargs)
-PluginSet.agent(*, system_prompt=..., tools=..., hooks=..., **kwargs)
-Agent.prompt_sync(
-    message: str | Message | list[Message],
-    images: list[ImageContent] | None = None,
-) -> RunResult
-```
-
-In the adapter, `OpenAICompletionsProvider.model(id, max_tokens=...)` creates the
-Completions model; the Responses path creates a `ModelInfo` with
-`api="openai-responses"`. `AgentRunner.context_texts()` reads sorted
-`.pi/context/*.md`, `require_skill()` reads the active `SKILL.md`, and
-`build_system_prompt()` assembles them. `load_plugins([PI_DIR])` reads `.pi/mcp.json`
-as configuration, then `PluginSet.agent()` creates the agent and
-`Agent.prompt_sync()` runs it. The MCP configuration starts
-[`mcp_curriculum_server.py`](mcp_curriculum_server.py), which provides list/search/read
-tools limited to `data/references/`.
-
 ## Files, privacy, and limits
 
 - Uploads accept PDF, DOCX, TXT, and Markdown; each file is limited to 10 MB, up to five
@@ -160,7 +136,4 @@ tools limited to `data/references/`.
 
 ## GitHub Pages and demonstrations
 
-The static project site lives in [`docs/`](docs/). Follow [`docs/README.md`](docs/README.md)
-to publish it from GitHub Pages; adding the files alone does not make the site public.
-The presentation and demonstration videos are separate submission items and must be
-recorded and linked by the project team.
+The static project site lives in [`docs/`](docs/). Follow [`docs/README.md`](docs/README.md) for a brief introduction.
